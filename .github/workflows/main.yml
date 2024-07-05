@@ -20,6 +20,7 @@ jobs:
       - run: npm install
       - run: npm install -g vsce
       - run: vsce package
+      - run: ls -la
   deploy:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
