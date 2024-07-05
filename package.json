@@ -1,7 +1,8 @@
 {
   "name": "github-sync-fork",
-  "displayName": "github-sync-fork",
+  "displayName": "Github Sync Fork",
   "description": "VSCode extension to sync your code from upstream in GitHub",
+  "icon": "images/icon.png",
   "publisher": "aspel",
   "license": "MIT",
   "repository": {
@@ -21,7 +22,7 @@
     "commands": [
       {
         "command": "github-sync-fork.upstream",
-        "title": "Sync from upstream"
+        "title": "GitHub Sync Fork"
       }
     ]
   },
