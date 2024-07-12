@@ -30,7 +30,7 @@ export class Repositories {
         const repoName = await this.getrepoName();
           
         try {
-            branchList = await octokit.repos.listBranches({ owner: userInfo.data.login, repo: repoName });
+            branchList = await octokit.repos.listBranches({ owner: userInfo.data.login, repo: repoName, per_page: 100 });
             return branchList;
 
         } catch (err) {
