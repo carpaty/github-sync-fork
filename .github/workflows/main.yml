@@ -39,5 +39,5 @@ jobs:
       - run: npm install
       - run: npm install -g vsce
       - run: vsce package
-      - run: vsce publish
+      - run: vsce publish --skip-duplicate
       - run: git push
