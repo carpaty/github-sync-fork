@@ -37,7 +37,7 @@ jobs:
           check-latest: true
       - run: git config --global user.email "lip@lip.net.ua"
       - run: git config --global user.name "aspel"
-      - run: npm version patch -m "Upgrade to [%s]"
+      - run: npm version patch -m "Update to [%s] [ci skip]"
       - run: npm install
       - run: npm install -g vsce
       - run: vsce package
