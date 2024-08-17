@@ -7,9 +7,8 @@ const SCOPES = ['user:email', 'repo', 'workflow'];
 export class Credentials {
 	private octokit: Octokit.Octokit | undefined;
 
-	async initialize(context: vscode.ExtensionContext): Promise<void> {
+	constructor(context: vscode.ExtensionContext) {
 		this.registerListeners(context);
-		this.setOctokit();
 	}
 
 	private async setOctokit() {
