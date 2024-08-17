@@ -136,9 +136,13 @@ export class Repositories {
                     }
                     vscode.window
                         .showInformationMessage(`Sync the '${selection.description}' branch of your GitHub fork with its upstream '${parentRepo}'?`, { modal: true }, "Sync")
-                        .then(answer => {
+                        .then(async (answer) => {
                             if (answer === `Sync`) {
-                                this.syncGitHubRepo(repoName, selection.description, userInfo, octokit);
+                                await this.syncGitHubRepo(repoName, selection.description ?? '??', userInfo, octokit);
+                                const remoteName = this.git?.getRepository(uri)?.state?.HEAD?.upstream?.remote;
+                                if (remoteName) {
+                                    await this.git?.getRepository(uri)?.fetch(remoteName);
+                                }
                             }
                         });
                 });
