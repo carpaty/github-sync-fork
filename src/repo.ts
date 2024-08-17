@@ -108,8 +108,8 @@ export class Repositories {
         if (!uri) {
             return;
         }
-		const octokit = await credentials.getOctokit();
-		const userInfo: GetAuthenticatedResponseDataType = (await octokit.users.getAuthenticated()).data;
+	const octokit = await credentials.getOctokit();
+	const userInfo: GetAuthenticatedResponseDataType = (await octokit.users.getAuthenticated()).data;
         const repoName = this.getGitHubRepoName(userInfo.login, uri);
         if (repoName === "") {
             vscode.window.showInformationMessage('Current workspace is not associated with a GitHub repository of yours.');
