@@ -25,9 +25,19 @@
     "commands": [
       {
         "command": "github-sync-fork.upstream",
-        "title": "GitHub Sync Fork"
+        "title": "GitHub Sync Fork",
+        "icon": "$(repo-forked)"
       }
-    ]
+    ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "github-sync-fork.upstream",
+          "group": "navigation",
+          "when": "scmProvider == git"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
