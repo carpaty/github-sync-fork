@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '14'
+          node-version: '20'
           check-latest: true
       - run: git config --global user.email "lip@lip.net.ua"
       - run: git config --global user.name "aspel"
@@ -33,7 +33,7 @@ jobs:
           token: ${{ secrets.CARPATY_ACTION }}
       - uses: actions/setup-node@v4
         with:
-          node-version: '14'
+          node-version: '20'
           check-latest: true
       - run: git config --global user.email "lip@lip.net.ua"
       - run: git config --global user.name "aspel"
