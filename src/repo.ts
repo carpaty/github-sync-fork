@@ -2,11 +2,14 @@ import { GetResponseDataTypeFromEndpointMethod } from '@octokit/types';
 import { Octokit } from '@octokit/rest';
 import * as vscode from 'vscode';
 import * as git from '../git';
+import { Credentials } from './cred';
 
 const octokit = new Octokit();
 
 type GetBranchResponseDataType = GetResponseDataTypeFromEndpointMethod<typeof octokit.repos.getBranch>;
+type GetResponseDataType = GetResponseDataTypeFromEndpointMethod<typeof octokit.repos.get>;
 type ListBranchesResponseDataType = GetResponseDataTypeFromEndpointMethod<typeof octokit.repos.listBranches>;
+type GetAuthenticatedResponseDataType = GetResponseDataTypeFromEndpointMethod<typeof octokit.users.getAuthenticated>;
 
 export class Repositories {
 
@@ -17,29 +20,36 @@ export class Repositories {
         this.git = vscode.extensions.getExtension<git.GitExtension>('vscode.git')?.exports?.getAPI(1);
     }
 
-    getRepoName(){
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (workspaceFolders && workspaceFolders.length > 0) {
-            return workspaceFolders[0].name;
+    private getGitHubRepoName(owner: string, uri: vscode.Uri):string {
+        const repo = this.git?.getRepository(uri);
+        if (!repo) {
+            return "";
         }
-        return "Unknown";
+        const remote = repo.state.remotes.find(remote => remote.name === repo.state.HEAD?.upstream?.remote);
+        if (!remote?.fetchUrl) {
+            return "";
+        }
+        const fetchUri = vscode.Uri.parse(remote.fetchUrl);
+        if (fetchUri.authority !== 'github.com') {
+            return "";
+        }
+        if (fetchUri.path.split('/')[1] !== owner) {
+            return "";
+        }
+        const name = fetchUri.path.split('/').pop();
+        return name?.endsWith('.git') ? name.slice(0, -4) : name ?? "";
     }
 
-    getCurrentBranchName(): string{
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (workspaceFolders && workspaceFolders.length > 0) {
-            return this.git?.getRepository(workspaceFolders[0].uri)?.state.HEAD?.name ?? "";
-        }
-        return "";
+    private getCurrentBranchName(uri: vscode.Uri):string {
+        const repo = this.git?.getRepository(uri);
+        return repo ? repo.state.HEAD?.name ?? "" : "";
     }
     
-    async getParentName(userInfo: any, octokit: Octokit, repoName: any){
-        let parentRepo;
-
+    private async getParentName(userInfo: GetAuthenticatedResponseDataType, octokit: Octokit, repoName: string){
         try {
-            parentRepo = await octokit.repos.get({ owner: userInfo.data.login, repo: repoName });
-            if (parentRepo.data.parent) {
-                return parentRepo.data.parent.full_name;
+            const repo: GetResponseDataType = (await octokit.repos.get({ owner: userInfo.login, repo: repoName })).data;
+            if (repo.parent) {
+                return repo.parent.full_name;
             }
         } catch (err) {
             console.log(err);
@@ -47,31 +57,38 @@ export class Repositories {
         return;
     }
     
-    async getBranchList(userInfo: any, octokit: Octokit): Promise<ListBranchesResponseDataType> {
+    private async getBranchList(userInfo: GetAuthenticatedResponseDataType, octokit: Octokit, uri: vscode.Uri): Promise<ListBranchesResponseDataType> {
         let branchList: ListBranchesResponseDataType;
-        const repoName = this.getRepoName();
-        const currentBranchName = this.getCurrentBranchName();
+        const repoName = this.getGitHubRepoName(userInfo.login, uri);
+        if (repoName === "") {
+            return [];
+        }
+        const currentBranchName = this.getCurrentBranchName(uri);
         let currentBranch: GetBranchResponseDataType;
-        currentBranch = (await octokit.repos.getBranch({ owner: userInfo.data.login, repo: repoName, branch: currentBranchName })).data;
-        branchList = (await octokit.repos.listBranches({ owner: userInfo.data.login, repo: repoName, per_page: 100 })).data ?? [];
+        try {
+            currentBranch = (await octokit.repos.getBranch({ owner: userInfo.login, repo: repoName, branch: currentBranchName })).data;
+        } catch (err: any) {
+            return [];
+        }
+        branchList = (await octokit.repos.listBranches({ owner: userInfo.login, repo: repoName, per_page: 100 })).data ?? [];
 
         // Put current branch first in the list
         return [ currentBranch, ...branchList?.filter((branch: any) => branch.name !== currentBranchName) ];
     }
 
-    async syncGitHubRepo(repo: any, branch: any, userInfo: any, octokit: Octokit) {
+    private async syncGitHubRepo(repoName: string, branch: string, userInfo: GetAuthenticatedResponseDataType, octokit: Octokit) {
         let message = 'Unable to sync on GitHub';
         try {
 
             const result = await octokit.repos.mergeUpstream({
-                owner: userInfo.data.login,
-                repo: repo,
+                owner: userInfo.login,
+                repo: repoName,
                 branch: branch,
                 
             });
             if (result) {
                 if (result.status === 200) {
-                    message = `The '${branch}' branch of your '${repo}' fork has been synced with its upstream`;
+                    message = `The '${branch}' branch of your '${repoName}' fork has been synced with its upstream.`;
                 }
             }
         } catch (err: any) {
@@ -80,9 +97,29 @@ export class Repositories {
             vscode.window.showInformationMessage(message);
         }
     }
-    async handleQuickPickList(userInfo: any, octokit: Octokit) {
-        const branchList = await this.getBranchList(userInfo, octokit);
-        const repoName = this.getRepoName();
+    async handleQuickPickList(credentials: Credentials, uri?: vscode.Uri) {
+        if (!uri) {
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders || workspaceFolders.length === 0) {
+                return;
+            }
+            uri = workspaceFolders[0]?.uri;
+        }
+        if (!uri) {
+            return;
+        }
+		const octokit = await credentials.getOctokit();
+		const userInfo: GetAuthenticatedResponseDataType = (await octokit.users.getAuthenticated()).data;
+        const repoName = this.getGitHubRepoName(userInfo.login, uri);
+        if (repoName === "") {
+            vscode.window.showInformationMessage('Current workspace is not associated with a GitHub repository of yours.');
+            return;
+        }
+        const branchList = await this.getBranchList(userInfo, octokit, uri);
+        if (!branchList) {
+            vscode.window.showInformationMessage('No branches found');
+            return;
+        }
         const parentRepo = await this.getParentName(userInfo, octokit, repoName);
         try {
             if (branchList && parentRepo) {
@@ -106,7 +143,7 @@ export class Repositories {
                         });
                 });
             } else {
-                vscode.window.showInformationMessage(`Your repo ${repoName} doesn't have any upstream.`);
+                vscode.window.showInformationMessage(`Your GitHub repo '${repoName}' doesn't have an upstream.`);
             }
         } catch (err) {
             console.log(err);

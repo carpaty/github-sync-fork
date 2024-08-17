@@ -15,10 +15,8 @@ export function activate(context: vscode.ExtensionContext) {
 	const credentials = new Credentials(context);
 	const repositories = new Repositories();
 
-	const disposable = vscode.commands.registerCommand('github-sync-fork.upstream', async () => {
-		const octokit = await credentials.getOctokit();
-		const userInfo = await octokit.users.getAuthenticated();
-		repositories.handleQuickPickList(userInfo, octokit);
+	const disposable = vscode.commands.registerCommand('github-sync-fork.upstream', async (sourceControl?: vscode.SourceControl) => {
+		repositories.handleQuickPickList(credentials, sourceControl?.rootUri);
 	});
 
 	context.subscriptions.push(disposable);
