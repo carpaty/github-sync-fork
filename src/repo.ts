@@ -126,7 +126,6 @@ export class Repositories {
                 // add a theme icon to quick pick item 
                 const items: vscode.QuickPickItem[] = branchList.map(({ name }) => ({
                     label: `$(git-branch) ${name}`,
-                    description: name,
                 }));
 
                 vscode.window.showQuickPick(items, { placeHolder: `Choose the branch you want to sync from ${parentRepo}` }).then(selection => {
