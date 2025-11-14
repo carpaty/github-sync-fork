@@ -25,7 +25,9 @@
     "commands": [
       {
         "command": "github-sync-fork.upstream",
-        "title": "GitHub Sync Fork",
+        "category": "GitHub Sync Fork",
+        "title": "Sync at GitHub from Upstream",
+        "shortTitle": "Sync Fork at GitHub from Upstream",
         "icon": "$(repo-forked)"
       }
     ],
