@@ -128,7 +128,7 @@ export class Repositories {
                     label: `$(git-branch) ${name}`,
                 }));
 
-                vscode.window.showQuickPick(items, { placeHolder: `Choose the branch you want to sync from ${parentRepo}` }).then(selection => {
+                vscode.window.showQuickPick(items, { title: `Sync Fork at GitHub from Upstream`, placeHolder: `Choose branch to sync from '${parentRepo}'` }).then(selection => {
                     // the user canceled the selection
                     if (!selection) {
                         return;
