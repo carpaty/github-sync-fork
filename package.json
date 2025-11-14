@@ -11,7 +11,7 @@
   },
   "version": "0.0.13",
   "engines": {
-    "vscode": "^1.91.0"
+    "vscode": "^1.106.0"
   },
   "categories": [
     "Other"
@@ -36,7 +36,20 @@
         {
           "command": "github-sync-fork.upstream",
           "group": "navigation",
-          "when": "scmProvider == git"
+          "when": "scmProvider == git && github.hasGitHubRepo"
+        }
+      ],
+      "scm/repository": [
+        {
+          "command": "github-sync-fork.upstream",
+          "group": "inline",
+          "when": "scmProvider == git && github.hasGitHubRepo && scmProviderContext == repository"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "github-sync-fork.upstream",
+          "when": "github.hasGitHubRepo"
         }
       ]
     }
@@ -54,7 +67,7 @@
   },
   "devDependencies": {
     "@octokit/types": "13.5.0",
-    "@types/vscode": "^1.91.0",
+    "@types/vscode": "^1.106.0",
     "@types/mocha": "^10.0.7",
     "@types/node": "20.x",
     "@typescript-eslint/eslint-plugin": "^7.14.1",
