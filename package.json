@@ -1,7 +1,7 @@
 {
   "name": "github-sync-fork",
   "displayName": "GitHub Sync Fork",
-  "description": "VSCode extension to sync your code from upstream in GitHub",
+  "description": "VS Code extension to sync your code from upstream in GitHub",
   "icon": "images/icon.png",
   "publisher": "aspel",
   "license": "MIT",
