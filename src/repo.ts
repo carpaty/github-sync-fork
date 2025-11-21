@@ -108,8 +108,8 @@ export class Repositories {
         if (!uri) {
             return;
         }
-	const octokit = await credentials.getOctokit();
-	const userInfo: GetAuthenticatedResponseDataType = (await octokit.users.getAuthenticated()).data;
+        const octokit = await credentials.getOctokit();
+        const userInfo: GetAuthenticatedResponseDataType = (await octokit.users.getAuthenticated()).data;
         const repoName = this.getGitHubRepoName(userInfo.login, uri);
         if (repoName === "") {
             vscode.window.showInformationMessage('Current workspace is not associated with a GitHub repository of yours.');
@@ -123,9 +123,13 @@ export class Repositories {
         const parentRepo = await this.getParentName(userInfo, octokit, repoName);
         try {
             if (branchList && parentRepo) {
-                // add a theme icon to quick pick item 
-                const items: vscode.QuickPickItem[] = branchList.map(({ name }) => ({
+                // add a theme icon to quick pick item label
+                interface BranchQuickPickItem extends vscode.QuickPickItem {
+                    branchName: string;
+                }
+                const items: BranchQuickPickItem[] = branchList.map(({ name }) => ({
                     label: `$(git-branch) ${name}`,
+                    branchName: name
                 }));
 
                 vscode.window.showQuickPick(items, { title: `Sync Fork at GitHub from Upstream`, placeHolder: `Choose branch to sync from '${parentRepo}'` }).then(selection => {
@@ -134,10 +138,10 @@ export class Repositories {
                         return;
                     }
                     vscode.window
-                        .showInformationMessage(`Sync the '${selection.description}' branch of your GitHub fork with its upstream '${parentRepo}'?`, { modal: true }, "Sync")
+                        .showInformationMessage(`Sync the '${selection.branchName}' branch of your GitHub fork with its upstream '${parentRepo}'?`, { modal: true }, "Sync")
                         .then(async (answer) => {
                             if (answer === `Sync`) {
-                                await this.syncGitHubRepo(repoName, selection.description ?? '??', userInfo, octokit);
+                                await this.syncGitHubRepo(repoName, selection.branchName ?? '??', userInfo, octokit);
                                 const remoteName = this.git?.getRepository(uri)?.state?.HEAD?.upstream?.remote;
                                 if (remoteName) {
                                     await this.git?.getRepository(uri)?.fetch(remoteName);
