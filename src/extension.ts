@@ -21,6 +21,12 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(disposable);
 
+	// New command: create a GitHub branch in the fork and sync it with upstream
+	const createBranchDisposable = vscode.commands.registerCommand('github-sync-fork.createBranch', async (sourceControl?: vscode.SourceControl) => {
+		await repositories.createBranchAndSync(credentials, sourceControl?.rootUri);
+	});
+	context.subscriptions.push(createBranchDisposable);
+
 }
 
 // This method is called when your extension is deactivated
