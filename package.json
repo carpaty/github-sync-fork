@@ -24,7 +24,7 @@
   "contributes": {
     "commands": [
       {
-        "command": "github-sync-fork.upstream",
+        "command": "github-sync-fork.syncBranch",
         "category": "GitHub Sync Fork",
         "title": "Sync branch at GitHub from Upstream branch",
         "shortTitle": "Sync Fork at GitHub from Upstream",
@@ -41,21 +41,21 @@
     "menus": {
       "scm/title": [
         {
-          "command": "github-sync-fork.upstream",
+          "command": "github-sync-fork.syncBranch",
           "group": "navigation",
           "when": "scmProvider == git && github.hasGitHubRepo"
         }
       ],
       "scm/repository": [
         {
-          "command": "github-sync-fork.upstream",
+          "command": "github-sync-fork.syncBranch",
           "group": "inline",
           "when": "scmProvider == git && github.hasGitHubRepo && scmProviderContext == repository"
         }
       ],
       "commandPalette": [
         {
-          "command": "github-sync-fork.upstream",
+          "command": "github-sync-fork.syncBranch",
           "when": "github.hasGitHubRepo"
         }
       ]

@@ -15,11 +15,10 @@ export function activate(context: vscode.ExtensionContext) {
 	const credentials = new Credentials(context);
 	const repositories = new Repositories();
 
-	const disposable = vscode.commands.registerCommand('github-sync-fork.upstream', async (sourceControl?: vscode.SourceControl) => {
-		repositories.handleQuickPickList(credentials, sourceControl?.rootUri);
+	const syncBranchDisposable = vscode.commands.registerCommand('github-sync-fork.syncBranch', async (sourceControl?: vscode.SourceControl) => {
+		await repositories.syncBranch(credentials, sourceControl?.rootUri);
 	});
-
-	context.subscriptions.push(disposable);
+	context.subscriptions.push(syncBranchDisposable);
 
 	// New command: create a GitHub branch in the fork and sync it with upstream
 	const createBranchDisposable = vscode.commands.registerCommand('github-sync-fork.createBranch', async (sourceControl?: vscode.SourceControl) => {
