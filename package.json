@@ -26,10 +26,18 @@
       {
         "command": "github-sync-fork.upstream",
         "category": "GitHub Sync Fork",
-        "title": "Sync at GitHub from Upstream",
+        "title": "Sync branch at GitHub from Upstream branch",
         "shortTitle": "Sync Fork at GitHub from Upstream",
         "icon": "$(repo-forked)"
+      },
+      {
+        "command": "github-sync-fork.createBranch",
+        "category": "GitHub Sync Fork",
+        "title": "Create GitHub branch linked to upstream",
+        "shortTitle": "Create GitHub Branch",
+        "icon": "$(git-merge)"
       }
+
     ],
     "menus": {
       "scm/title": [
