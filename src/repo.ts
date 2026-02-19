@@ -4,295 +4,348 @@ import * as vscode from 'vscode';
 import * as git from '../git';
 import { Credentials } from './cred';
 
-const octokit = new Octokit();
+type OctokitInstance = InstanceType<typeof Octokit>;
+type GetBranchResponseDataType = GetResponseDataTypeFromEndpointMethod<OctokitInstance['repos']['getBranch']>;
+type GetResponseDataType = GetResponseDataTypeFromEndpointMethod<OctokitInstance['repos']['get']>;
+type ListBranchesResponseDataType = GetResponseDataTypeFromEndpointMethod<OctokitInstance['repos']['listBranches']>;
+type GetAuthenticatedResponseDataType = GetResponseDataTypeFromEndpointMethod<OctokitInstance['users']['getAuthenticated']>;
 
-type GetBranchResponseDataType = GetResponseDataTypeFromEndpointMethod<typeof octokit.repos.getBranch>;
-type GetResponseDataType = GetResponseDataTypeFromEndpointMethod<typeof octokit.repos.get>;
-type ListBranchesResponseDataType = GetResponseDataTypeFromEndpointMethod<typeof octokit.repos.listBranches>;
-type GetAuthenticatedResponseDataType = GetResponseDataTypeFromEndpointMethod<typeof octokit.users.getAuthenticated>;
+interface BranchQuickPickItem extends vscode.QuickPickItem { branchName: string; }
+interface BranchOptionItem extends vscode.QuickPickItem { branchName?: string; }
 
 export class Repositories {
 
     private git: git.API | undefined;
+    private log: (msg: string) => void;
 
-    constructor() {
-        // Make the built-in Git extension's API available
+    constructor(logger: (msg: string) => void = () => {}) {
         this.git = vscode.extensions.getExtension<git.GitExtension>('vscode.git')?.exports?.getAPI(1);
+        this.log = logger;
     }
 
-    private getGitHubRepoName(owner: string, uri: vscode.Uri):string {
-        const repo = this.git?.getRepository(uri);
-        if (!repo) {
-            return "";
-        }
-        const remote = repo.state.remotes.find(remote => remote.name === repo.state.HEAD?.upstream?.remote);
-        if (!remote?.fetchUrl) {
-            return "";
-        }
-        const fetchUri = vscode.Uri.parse(remote.fetchUrl);
-        if (fetchUri.authority !== 'github.com') {
-            return "";
-        }
-        if (fetchUri.path.split('/')[1] !== owner) {
-            return "";
-        }
-        const name = fetchUri.path.split('/').pop();
-        return name?.endsWith('.git') ? name.slice(0, -4) : name ?? "";
+    private resolveUri(uri?: vscode.Uri): vscode.Uri | undefined {
+        return uri ?? vscode.workspace.workspaceFolders?.[0]?.uri;
     }
 
-    private getCurrentBranchName(uri: vscode.Uri):string {
-        const repo = this.git?.getRepository(uri);
-        return repo ? repo.state.HEAD?.name ?? "" : "";
+    // Parses both HTTPS and SSH GitHub remote URLs.
+    private parseGitHubOwnerRepo(fetchUrl: string): { owner: string; repo: string } | undefined {
+        // HTTPS: https://[credentials@]github.com/owner/repo[.git]
+        const httpsMatch = fetchUrl.match(/^https?:\/\/(?:[^@]+@)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/)?$/);
+        if (httpsMatch) { return { owner: httpsMatch[1], repo: httpsMatch[2] }; }
+
+        // SSH: git@github.com:owner/repo[.git]
+        const sshMatch = fetchUrl.match(/^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/);
+        if (sshMatch) { return { owner: sshMatch[1], repo: sshMatch[2] }; }
+
+        return undefined;
     }
-    
-    private async getParentName(userInfo: GetAuthenticatedResponseDataType, octokit: Octokit, repoName: string){
+
+    // Finds the best GitHub remote: tracking remote > 'origin' > any GitHub remote.
+    // Falls back gracefully when the current branch has no upstream tracking set.
+    private resolveGitHubRemote(repo: git.Repository): git.Remote | undefined {
+        const remotes = repo.state.remotes;
+
+        const trackingName = repo.state.HEAD?.upstream?.remote;
+        if (trackingName) {
+            const tracked = remotes.find(r => r.name === trackingName && !!r.fetchUrl && !!this.parseGitHubOwnerRepo(r.fetchUrl!));
+            if (tracked) { return tracked; }
+        }
+
+        const githubRemotes = remotes.filter(r => !!r.fetchUrl && !!this.parseGitHubOwnerRepo(r.fetchUrl!));
+        return githubRemotes.find(r => r.name === 'origin') ?? githubRemotes[0];
+    }
+
+    private getGitHubRepoName(owner: string, uri: vscode.Uri): string {
+        const repo = this.git?.getRepository(uri);
+        if (!repo) { return ""; }
+
+        const remote = this.resolveGitHubRemote(repo);
+        if (!remote?.fetchUrl) { return ""; }
+
+        const parsed = this.parseGitHubOwnerRepo(remote.fetchUrl);
+        if (!parsed || parsed.owner !== owner) { return ""; }
+
+        return parsed.repo;
+    }
+
+    private getCurrentBranchName(uri: vscode.Uri): string {
+        return this.git?.getRepository(uri)?.state.HEAD?.name ?? "";
+    }
+
+    private async getParentInfo(userInfo: GetAuthenticatedResponseDataType, octokit: Octokit, repoName: string): Promise<{ fullName: string; defaultBranch: string } | undefined> {
         try {
             const repo: GetResponseDataType = (await octokit.repos.get({ owner: userInfo.login, repo: repoName })).data;
-            if (repo && repo.parent) {
-                return repo.parent.full_name;
-            }
-        } catch (err) {
-            console.log(err);
+            if (!repo.parent) { return undefined; }
+            return { fullName: repo.parent.full_name, defaultBranch: repo.parent.default_branch };
+        } catch {
+            return undefined;
         }
-        return;
     }
-    
+
     private async getBranchList(userInfo: GetAuthenticatedResponseDataType, octokit: Octokit, uri: vscode.Uri): Promise<ListBranchesResponseDataType> {
-        let branchList: ListBranchesResponseDataType;
         const repoName = this.getGitHubRepoName(userInfo.login, uri);
-        if (repoName === "") {
-            return [];
-        }
+        if (!repoName) { return []; }
+
         const currentBranchName = this.getCurrentBranchName(uri);
         let currentBranch: GetBranchResponseDataType;
         try {
             currentBranch = (await octokit.repos.getBranch({ owner: userInfo.login, repo: repoName, branch: currentBranchName })).data;
-        } catch (err: any) {
+        } catch {
             return [];
         }
-        branchList = (await octokit.repos.listBranches({ owner: userInfo.login, repo: repoName, per_page: 100 })).data ?? [];
 
-        // Put current branch first in the list
-        return [ currentBranch, ...branchList?.filter((branch: any) => branch.name !== currentBranchName) ];
+        const branchList = await octokit.paginate(octokit.repos.listBranches, { owner: userInfo.login, repo: repoName, per_page: 100 });
+        return [currentBranch, ...branchList.filter(b => b.name !== currentBranchName)];
+    }
+
+    private async getRepoContext(credentials: Credentials, uri: vscode.Uri) {
+        const octokit = await credentials.getOctokit();
+        const userInfo: GetAuthenticatedResponseDataType = (await octokit.users.getAuthenticated()).data;
+        const repoName = this.getGitHubRepoName(userInfo.login, uri);
+        return { octokit, userInfo, repoName };
+    }
+
+    private async fetchRemote(uri: vscode.Uri): Promise<void> {
+        const repo = this.git?.getRepository(uri);
+        const remoteName = repo?.state.HEAD?.upstream?.remote;
+        if (remoteName) {
+            try {
+                await repo?.fetch(remoteName);
+            } catch {
+                // local fetch is best-effort
+            }
+        }
+    }
+
+    // Subscribes to branch switches across all open repositories.
+    // Returns disposables that must be pushed to context.subscriptions.
+    subscribeToCurrentBranchChanges(handler: () => void): vscode.Disposable[] {
+        if (!this.git) { return []; }
+        let lastBranch = '';
+        const disposables: vscode.Disposable[] = [];
+
+        const watchRepo = (repo: git.Repository) => {
+            disposables.push(repo.state.onDidChange(() => {
+                const branch = repo.state.HEAD?.name ?? '';
+                if (branch !== lastBranch) {
+                    lastBranch = branch;
+                    handler();
+                }
+            }));
+        };
+
+        this.git.repositories.forEach(watchRepo);
+        disposables.push(this.git.onDidOpenRepository(watchRepo));
+        return disposables;
+    }
+
+    // Returns how many commits the current fork branch is behind the matching upstream branch,
+    // or undefined if not applicable (not a fork, no upstream branch match, not authenticated).
+    async getForkBehindCount(credentials: Credentials, uri: vscode.Uri): Promise<number | undefined> {
+        this.log(`getForkBehindCount: uri=${uri.fsPath}`);
+        try {
+            const octokit = await credentials.tryGetOctokit();
+            this.log(`getForkBehindCount: octokit=${octokit ? 'available' : 'undefined (not authenticated)'}`);
+            if (!octokit) { return undefined; }
+
+            const userInfo: GetAuthenticatedResponseDataType = (await octokit.users.getAuthenticated()).data;
+            this.log(`getForkBehindCount: login=${userInfo.login}`);
+
+            const repoName = this.getGitHubRepoName(userInfo.login, uri);
+            this.log(`getForkBehindCount: repoName=${repoName || '(empty — not a GitHub repo or remote not matched)'}`);
+            if (!repoName) { return undefined; }
+
+            const parentInfo = await this.getParentInfo(userInfo, octokit, repoName);
+            this.log(`getForkBehindCount: parentInfo=${parentInfo ? `${parentInfo.fullName} (default: ${parentInfo.defaultBranch})` : '(undefined — not a fork)'}`);
+            if (!parentInfo) { return undefined; }
+
+            const [parentOwner, parentRepo] = parentInfo.fullName.split('/');
+            const branchName = this.getCurrentBranchName(uri);
+            this.log(`getForkBehindCount: branchName=${branchName || '(empty)'}`);
+            if (!branchName) { return undefined; }
+
+            // Compare fork branch (base) against matching upstream branch (head).
+            // If the upstream doesn't have the same branch name, fall back to the
+            // upstream's default branch (e.g. fork is on 'master', upstream uses 'main').
+            this.log(`getForkBehindCount: compareCommits base=${userInfo.login}:${branchName} head=${parentOwner}:${branchName}`);
+            try {
+                const { data } = await octokit.repos.compareCommits({
+                    owner: parentOwner,
+                    repo: parentRepo,
+                    base: `${userInfo.login}:${branchName}`,
+                    head: `${parentOwner}:${branchName}`
+                });
+                this.log(`getForkBehindCount: ahead_by=${data.ahead_by} status=${data.status}`);
+                return data.ahead_by;
+            } catch (err: any) {
+                this.log(`getForkBehindCount: compareCommits failed — status=${err.status} message=${err.message} — branch not in upstream, hiding`);
+                return undefined;
+            }
+        } catch (err: any) {
+            this.log(`getForkBehindCount: outer catch — ${err.message}`);
+            return undefined;
+        }
     }
 
     async syncBranch(credentials: Credentials, uri?: vscode.Uri) {
-        if (!uri) {
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (!workspaceFolders || workspaceFolders.length === 0) {
-                return;
-            }
-            uri = workspaceFolders[0]?.uri;
-        }
-        if (!uri) {
-            return;
-        }
+        const resolvedUri = this.resolveUri(uri);
+        if (!resolvedUri) { return; }
 
         try {
-            const octokit = await credentials.getOctokit();
-            const userInfo: GetAuthenticatedResponseDataType = (await octokit.users.getAuthenticated()).data;
-            const repoName = this.getGitHubRepoName(userInfo.login, uri);
-            if (!repoName) {
-                vscode.window.showInformationMessage('Current workspace is not associated with a GitHub repository of yours.');
-                return;
-            }
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: 'GitHub Sync Fork',
+                cancellable: false
+            }, async (progress) => {
+                progress.report({ message: 'Authenticating...' });
+                const { octokit, userInfo, repoName } = await this.getRepoContext(credentials, resolvedUri);
+                if (!repoName) {
+                    vscode.window.showInformationMessage('Current workspace is not associated with a GitHub repository of yours.');
+                    return;
+                }
 
-            const branchList = await this.getBranchList(userInfo, octokit, uri);
-            if (!branchList || branchList.length === 0) {
-                vscode.window.showInformationMessage('No branches found');
-                return;
-            }
+                progress.report({ message: 'Loading branches...' });
+                const [branchList, parentInfo] = await Promise.all([
+                    this.getBranchList(userInfo, octokit, resolvedUri),
+                    this.getParentInfo(userInfo, octokit, repoName)
+                ]);
 
-            const parentRepo = await this.getParentName(userInfo, octokit, repoName);
-            if (!parentRepo) {
-                vscode.window.showInformationMessage(`Your GitHub repo '${repoName}' doesn't have an upstream.`);
-                return;
-            }
+                if (!branchList.length) {
+                    vscode.window.showInformationMessage('No branches found.');
+                    return;
+                }
+                if (!parentInfo) {
+                    vscode.window.showInformationMessage(`Your GitHub repo '${repoName}' doesn't have an upstream.`);
+                    return;
+                }
 
-            interface BranchQuickPickItem extends vscode.QuickPickItem { branchName: string; }
-            const items: BranchQuickPickItem[] = branchList
-                .map(({ name }) => ({ label: `$(git-branch) ${name}`, branchName: name }));
+                progress.report({ message: '' }); // clear message while user picks
 
-            const selection = await vscode.window.showQuickPick(items, {
-                title: `Sync Fork at GitHub from Upstream`,
-                placeHolder: `Choose branch to sync from '${parentRepo}'`
-            });
-            if (!selection) return;
-
-            const confirm = await vscode.window.showInformationMessage(
-                `Sync the '${selection.branchName}' branch of your GitHub fork with its upstream '${parentRepo}'?`,
-                { modal: true },
-                'Sync'
-            );
-            if (confirm !== 'Sync') return;
-
-            // perform mergeUpstream inline and display concise result
-            try {
-                const res = await octokit.repos.mergeUpstream({
-                    owner: userInfo.login,
-                    repo: repoName,
-                    branch: selection.branchName
+                const items: BranchQuickPickItem[] = branchList.map(({ name }: { name: string }) => ({ label: `$(git-branch) ${name}`, branchName: name }));
+                const selection = await vscode.window.showQuickPick(items, {
+                    title: 'Sync Fork at GitHub from Upstream',
+                    placeHolder: `Choose branch to sync from '${parentInfo.fullName}'`
                 });
-                if (res && res.status === 200) {
-                    vscode.window.showInformationMessage(`The '${selection.branchName}' branch of '${repoName}' has been synced with its upstream.`);
-                } else {
-                    vscode.window.showInformationMessage(`Sync returned status ${res?.status ?? 'unknown'}.`);
-                }
-            } catch (err: any) {
-                vscode.window.showErrorMessage(`Failed to sync branch '${selection.branchName}': ${err.message}`);
-                return;
-            }
+                if (!selection) { return; }
 
-            // fetch remote locally if available
-            const remoteName = this.git?.getRepository(uri)?.state?.HEAD?.upstream?.remote;
-            if (remoteName) {
+                const confirm = await vscode.window.showInformationMessage(
+                    `Sync the '${selection.branchName}' branch of your GitHub fork with its upstream '${parentInfo.fullName}'?`,
+                    { modal: true },
+                    'Sync'
+                );
+                if (confirm !== 'Sync') { return; }
+
+                progress.report({ message: `Syncing '${selection.branchName}'...` });
                 try {
-                    await this.git?.getRepository(uri)?.fetch(remoteName);
-                } catch (err) {
-                    console.log('Local fetch error', err);
+                    const res = await octokit.repos.mergeUpstream({ owner: userInfo.login, repo: repoName, branch: selection.branchName });
+                    if (res.status === 200) {
+                        vscode.window.showInformationMessage(`The '${selection.branchName}' branch of '${repoName}' has been synced with its upstream.`);
+                    } else {
+                        vscode.window.showInformationMessage(`Sync returned status ${res.status}.`);
+                    }
+                } catch (err: any) {
+                    const msg = err.status === 409
+                        ? `Branch '${selection.branchName}' has diverged from upstream and cannot be synced automatically. Reset or rebase it locally first.`
+                        : `Failed to sync branch '${selection.branchName}': ${err.message}`;
+                    vscode.window.showErrorMessage(msg);
+                    return;
                 }
-            }
 
+                progress.report({ message: 'Updating local repository...' });
+                await this.fetchRemote(resolvedUri);
+            });
         } catch (err: any) {
             vscode.window.showErrorMessage(`Error: ${err.message}`);
         }
     }
 
     async createBranchAndSync(credentials: Credentials, uri?: vscode.Uri) {
-        if (!uri) {
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (!workspaceFolders || workspaceFolders.length === 0) {
-                return;
-            }
-            uri = workspaceFolders[0]?.uri;
-        }
-        if (!uri) {
-            return;
-        }
+        const resolvedUri = this.resolveUri(uri);
+        if (!resolvedUri) { return; }
 
         try {
-            const octo = await credentials.getOctokit();
-            const userInfo: GetAuthenticatedResponseDataType = (await octo.users.getAuthenticated()).data;
-            const repoName = this.getGitHubRepoName(userInfo.login, uri);
-            if (!repoName) {
-                vscode.window.showInformationMessage('Current workspace is not associated with a GitHub repository of yours.');
-                return;
-            }
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: 'GitHub Sync Fork',
+                cancellable: false
+            }, async (progress) => {
+                progress.report({ message: 'Authenticating...' });
+                const { octokit, userInfo, repoName } = await this.getRepoContext(credentials, resolvedUri);
+                if (!repoName) {
+                    vscode.window.showInformationMessage('Current workspace is not associated with a GitHub repository of yours.');
+                    return;
+                }
 
-            const parentFull = await this.getParentName(userInfo, octo, repoName);
-            if (!parentFull) {
-                vscode.window.showInformationMessage(`Your GitHub repo '${repoName}' doesn't have an upstream.`);
-                return;
-            }
-            const [parentOwner, parentRepo] = parentFull.split('/');
+                progress.report({ message: 'Loading upstream info...' });
+                const parentInfo = await this.getParentInfo(userInfo, octokit, repoName);
+                if (!parentInfo) {
+                    vscode.window.showInformationMessage(`Your GitHub repo '${repoName}' doesn't have an upstream.`);
+                    return;
+                }
+                const [parentOwner, parentRepo] = parentInfo.fullName.split('/');
 
-            // Ask for new branch name - first try to get existing branch name from upstream
-            let newBranchName: string | undefined;
-            const parentBranches = (await octo.repos.listBranches({ owner: parentOwner, repo: parentRepo, per_page: 100 })).data ?? [];
+                progress.report({ message: 'Loading upstream branches...' });
+                const parentBranches = await octokit.paginate(octokit.repos.listBranches, { owner: parentOwner, repo: parentRepo, per_page: 100 });
+                parentBranches.sort((a, b) => a.name.localeCompare(b.name));
 
-            // Sort upstream branches by name
-            parentBranches.sort((a, b) => a.name.localeCompare(b.name));
+                progress.report({ message: '' }); // clear message while user picks
 
-            // Show quick pick with upstream branches (with git icon) and an option to create a new name
-            interface BranchOptionItem extends vscode.QuickPickItem { branchName?: string | undefined; }
-            const branchItems: BranchOptionItem[] = [
-                ...parentBranches.map(b => ({ label: `$(git-branch) ${b.name}`, branchName: b.name })),
-                { label: 'Create new branch name...', branchName: undefined }
-            ];
+                const branchItems: BranchOptionItem[] = [
+                    ...parentBranches.map(b => ({ label: `$(git-branch) ${b.name}`, branchName: b.name })),
+                    { label: 'Create new branch name...', branchName: undefined }
+                ];
 
-            const selectedBranchItem = await vscode.window.showQuickPick(branchItems, {
-                placeHolder: 'Select an upstream branch or create a new one',
-                title: 'Choose branch source'
-            });
-            if (!selectedBranchItem) return;
+                const selectedBranchItem = await vscode.window.showQuickPick(branchItems, {
+                    placeHolder: 'Select an upstream branch or create a new one',
+                    title: 'Choose branch source'
+                });
+                if (!selectedBranchItem) { return; }
 
-            // If user selected to create new branch name
-            if (!selectedBranchItem.branchName) {
-                newBranchName = await vscode.window.showInputBox({
+                const newBranchName = selectedBranchItem.branchName ?? await vscode.window.showInputBox({
                     prompt: 'Enter the name for the new branch to create in your fork',
                     placeHolder: 'e.g. feature/my-new-thing',
-                    validateInput: (value) => value && value.trim().length > 0 ? null : 'Branch name is required'
+                    validateInput: (value) => value?.trim() ? null : 'Branch name is required'
                 });
-            } else {
-                // User selected an existing upstream branch (branchName provided)
-                newBranchName = selectedBranchItem.branchName;
-            }
-             
-            if (!newBranchName) {
-                return;
-            }
+                if (!newBranchName) { return; }
 
-            // List upstream branches to pick the source
-            let upstreamBranches = parentBranches.map(b => b.name);
+                // Put matching upstream branch first
+                const upstreamItems: BranchQuickPickItem[] = [
+                    ...parentBranches.filter(b => b.name === newBranchName),
+                    ...parentBranches.filter(b => b.name !== newBranchName)
+                ].map(b => ({ label: `$(git-branch) ${b.name}`, branchName: b.name }));
 
-            // If the new branch name matches an upstream branch, put it first
-            if (upstreamBranches.includes(newBranchName)) {
-                upstreamBranches = upstreamBranches.filter(name => name !== newBranchName);
-                upstreamBranches.unshift(newBranchName);
-            }
-
-            // present upstream branches with git-branch icon label
-            interface UpstreamItem extends vscode.QuickPickItem { branchName: string; }
-            const upstreamItems: UpstreamItem[] = upstreamBranches.map(name => ({ label: `$(git-branch) ${name}`, branchName: name }));
-
-            const upstreamSelection = await vscode.window.showQuickPick(upstreamItems, {
-                placeHolder: `Select upstream branch from '${parentFull}' to base ${newBranchName} on`,
-                canPickMany: false
-            });
-            if (!upstreamSelection) return;
-            const upstreamBranchName = upstreamSelection.branchName;
-
-            // Show confirmation message before creating branch
-            const confirmCreate = await vscode.window.showInformationMessage(
-                `Create branch '${newBranchName}' in '${repoName}' based on '${parentFull}:${upstreamBranchName}'?`,
-                { modal: true },
-                'Yes'
-            );
-
-            if (confirmCreate !== 'Yes') {
-                return;
-            }
-
-            // Get SHA of upstream branch
-            const upstreamBranch = (await octo.repos.getBranch({ owner: parentOwner, repo: parentRepo, branch: upstreamBranchName })).data;
-            const upstreamSha = upstreamBranch.commit.sha;
-
-            // Create the new branch ref in the user's fork pointing to upstream SHA
-            try {
-                await octo.git.createRef({
-                    owner: userInfo.login,
-                    repo: repoName,
-                    ref: `refs/heads/${newBranchName}`,
-                    sha: upstreamSha
+                const upstreamSelection = await vscode.window.showQuickPick(upstreamItems, {
+                    placeHolder: `Select upstream branch from '${parentInfo.fullName}' to base ${newBranchName} on`
                 });
-                vscode.window.showInformationMessage(`Branch '${newBranchName}' created in '${repoName}' from '${parentFull}:${upstreamBranchName}'.`);
-            } catch (err: any) {
-                vscode.window.showErrorMessage(`Failed to create branch: ${err.message}`);
-                return;
-            }
+                if (!upstreamSelection) { return; }
 
-            // Optionally call mergeUpstream to ensure any additional upstream metadata is applied
-            try {
-                await octo.repos.mergeUpstream({
-                    owner: userInfo.login,
-                    repo: repoName,
-                    branch: newBranchName
-                });
-            } catch (err) {
-                // ignore mergeUpstream errors, branch already points to upstream
-                console.log('mergeUpstream error', err);
-            }
+                const confirm = await vscode.window.showInformationMessage(
+                    `Create branch '${newBranchName}' in '${repoName}' based on '${parentInfo.fullName}:${upstreamSelection.branchName}'?`,
+                    { modal: true },
+                    'Yes'
+                );
+                if (confirm !== 'Yes') { return; }
 
-            // Fetch the remote locally so local repo can see the new branch
-            const remoteName = this.git?.getRepository(uri)?.state?.HEAD?.upstream?.remote;
-            if (remoteName) {
+                progress.report({ message: `Creating branch '${newBranchName}'...` });
+                const upstreamBranch = (await octokit.repos.getBranch({ owner: parentOwner, repo: parentRepo, branch: upstreamSelection.branchName })).data;
                 try {
-                    await this.git?.getRepository(uri)?.fetch(remoteName);
-                } catch (err) {
-                    console.log('Local fetch error', err);
+                    await octokit.git.createRef({ owner: userInfo.login, repo: repoName, ref: `refs/heads/${newBranchName}`, sha: upstreamBranch.commit.sha });
+                    vscode.window.showInformationMessage(`Branch '${newBranchName}' created in '${repoName}' from '${parentInfo.fullName}:${upstreamSelection.branchName}'.`);
+                } catch (err: any) {
+                    vscode.window.showErrorMessage(`Failed to create branch: ${err.message}`);
+                    return;
                 }
-            }
 
+                try {
+                    progress.report({ message: 'Syncing with upstream...' });
+                    await octokit.repos.mergeUpstream({ owner: userInfo.login, repo: repoName, branch: newBranchName });
+                } catch {
+                    // ignore — branch already points to upstream SHA
+                }
+
+                progress.report({ message: 'Updating local repository...' });
+                await this.fetchRemote(resolvedUri);
+            });
         } catch (err: any) {
             vscode.window.showErrorMessage(`Error creating and syncing branch: ${err.message}`);
         }
