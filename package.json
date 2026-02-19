@@ -38,6 +38,16 @@
         "icon": "$(git-merge)"
       }
     ],
+    "configuration": {
+      "title": "GitHub Sync Fork",
+      "properties": {
+        "github-sync-fork.debug": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging to the 'GitHub Sync Fork' output channel."
+        }
+      }
+    },
     "menus": {
       "scm/title": [
         {
