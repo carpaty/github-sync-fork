@@ -59,17 +59,30 @@ export class Repositories {
         const repo = this.git?.getRepository(uri);
         if (!repo) { return ""; }
 
-        const remote = this.resolveGitHubRemote(repo);
-        if (!remote?.fetchUrl) { return ""; }
+        // Prefer the previously resolved "best" remote when it belongs to the
+        // authenticated user. If the current branch tracks upstream, fall back
+        // to a user-owned remote (origin first, then any matching GitHub remote).
+        const primaryRemote = this.resolveGitHubRemote(repo);
+        if (primaryRemote?.fetchUrl) {
+            const parsed = this.parseGitHubOwnerRepo(primaryRemote.fetchUrl);
+            if (parsed?.owner === owner) { return parsed.repo; }
+        }
 
-        const parsed = this.parseGitHubOwnerRepo(remote.fetchUrl);
-        if (!parsed || parsed.owner !== owner) { return ""; }
+        const userRemotes = repo.state.remotes
+            .filter(r => !!r.fetchUrl)
+            .map(r => ({ remote: r, parsed: this.parseGitHubOwnerRepo(r.fetchUrl!) }))
+            .filter((x): x is { remote: git.Remote; parsed: { owner: string; repo: string } } => !!x.parsed && x.parsed.owner === owner);
 
-        return parsed.repo;
+        const preferred = userRemotes.find(x => x.remote.name === 'origin') ?? userRemotes[0];
+        return preferred?.parsed.repo ?? "";
     }
 
     private getCurrentBranchName(uri: vscode.Uri): string {
         return this.git?.getRepository(uri)?.state.HEAD?.name ?? "";
+    }
+
+    getCurrentBranch(uri: vscode.Uri): string {
+        return this.getCurrentBranchName(uri);
     }
 
     private async getParentInfo(userInfo: GetAuthenticatedResponseDataType, octokit: Octokit, repoName: string): Promise<{ fullName: string; defaultBranch: string } | undefined> {
@@ -121,17 +134,34 @@ export class Repositories {
     // Returns disposables that must be pushed to context.subscriptions.
     subscribeToCurrentBranchChanges(handler: () => void): vscode.Disposable[] {
         if (!this.git) { return []; }
-        let lastBranch = '';
+        const lastBranchByRepo = new Map<git.Repository, string>();
         const disposables: vscode.Disposable[] = [];
 
         const watchRepo = (repo: git.Repository) => {
+            lastBranchByRepo.set(repo, repo.state.HEAD?.name ?? '');
             disposables.push(repo.state.onDidChange(() => {
                 const branch = repo.state.HEAD?.name ?? '';
-                if (branch !== lastBranch) {
-                    lastBranch = branch;
+                const previousBranch = lastBranchByRepo.get(repo) ?? '';
+                if (branch !== previousBranch) {
+                    lastBranchByRepo.set(repo, branch);
                     handler();
                 }
             }));
+        };
+
+        this.git.repositories.forEach(watchRepo);
+        disposables.push(this.git.onDidOpenRepository(watchRepo));
+        return disposables;
+    }
+
+    // Subscribes to repository state changes for all open repositories.
+    // Emits root URI so callers can scope background work.
+    subscribeToRepositoryStateChanges(handler: (uri: vscode.Uri) => void): vscode.Disposable[] {
+        if (!this.git) { return []; }
+        const disposables: vscode.Disposable[] = [];
+
+        const watchRepo = (repo: git.Repository) => {
+            disposables.push(repo.state.onDidChange(() => handler(repo.rootUri)));
         };
 
         this.git.repositories.forEach(watchRepo);
@@ -256,6 +286,42 @@ export class Repositories {
             });
         } catch (err: any) {
             vscode.window.showErrorMessage(`Error: ${err.message}`);
+        }
+    }
+
+    // Syncs the current checked-out branch in the fork with upstream without user pickers.
+    // Returns true when a sync was performed successfully, false when not applicable/failed.
+    async syncCurrentBranch(credentials: Credentials, uri?: vscode.Uri, options?: { showSuccessMessage?: boolean }): Promise<boolean> {
+        const resolvedUri = this.resolveUri(uri);
+        if (!resolvedUri) { return false; }
+
+        try {
+            const octokit = await credentials.tryGetOctokit();
+            if (!octokit) { return false; }
+
+            const userInfo: GetAuthenticatedResponseDataType = (await octokit.users.getAuthenticated()).data;
+            const repoName = this.getGitHubRepoName(userInfo.login, resolvedUri);
+            if (!repoName) { return false; }
+
+            const parentInfo = await this.getParentInfo(userInfo, octokit, repoName);
+            if (!parentInfo) { return false; }
+
+            const branchName = this.getCurrentBranchName(resolvedUri);
+            if (!branchName) { return false; }
+
+            await octokit.repos.mergeUpstream({ owner: userInfo.login, repo: repoName, branch: branchName });
+            if (options?.showSuccessMessage) {
+                vscode.window.showInformationMessage(`The '${branchName}' branch of '${repoName}' has been synced with its upstream.`);
+            }
+
+            await this.fetchRemote(resolvedUri);
+            return true;
+        } catch (err: any) {
+            const message = err?.status === 409
+                ? 'Auto-sync skipped because the branch has diverged from upstream.'
+                : `Auto-sync failed: ${err?.message ?? 'Unknown error'}`;
+            vscode.window.showWarningMessage(message);
+            return false;
         }
     }
 
