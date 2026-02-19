@@ -45,6 +45,33 @@
           "type": "boolean",
           "default": false,
           "description": "Enable debug logging to the 'GitHub Sync Fork' output channel."
+        },
+        "github-sync-fork.autoSyncOnPull": {
+          "type": "string",
+          "enum": [
+            "off",
+            "prompt",
+            "always"
+          ],
+          "default": "off",
+          "description": "Automatically sync the current fork branch after repository updates (such as pull/fetch) when it is behind upstream. In 'prompt' mode, pause timing can also include prompt rate-limit windows."
+        },
+        "github-sync-fork.autoSyncBranches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "main",
+            "master"
+          ],
+          "description": "Branch patterns eligible for auto-sync (supports '*' and '?'). Prefix with '!' to exclude branches (for example '!release/*')."
+        },
+        "github-sync-fork.autoSyncCooldownMinutes": {
+          "type": "number",
+          "minimum": 0,
+          "default": 30,
+          "description": "Minimum minutes between auto-sync actions/prompts for the same repository branch. The status bar 'auto-sync paused' time is calculated from cooldown plus any active snooze/rate-limit windows."
         }
       }
     },
@@ -65,8 +92,7 @@
       ],
       "commandPalette": [
         {
-          "command": "github-sync-fork.syncBranch",
-          "when": "github.hasGitHubRepo"
+          "command": "github-sync-fork.syncBranch"
         }
       ]
     }
