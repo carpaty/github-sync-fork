@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import * as assert from 'assert';
 import { getAutoSyncPauseInfo, getPromptRateLimitPauseInfo, getUnifiedPauseInfo, isBranchEligibleForAutoSync, isPromptThrottled } from '../autoSyncPolicy';
 

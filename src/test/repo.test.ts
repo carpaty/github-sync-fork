@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { Credentials } from '../cred';

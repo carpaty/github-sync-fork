@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import { GetResponseDataTypeFromEndpointMethod } from '@octokit/types';
 import { Octokit } from '@octokit/rest';
 import * as vscode from 'vscode';

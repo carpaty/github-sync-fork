@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import * as vscode from 'vscode';
 import { Octokit } from '@octokit/rest';
 
