@@ -3,11 +3,11 @@
 Sync your GitHub fork branches with upstream directly from VS Code.
 
 ## Live Preview
-
-![GitHub Sync Fork live preview](https://github.com/user-attachments/assets/8187ea64-ddf5-4fae-b148-71e4c7c6083c)
+![combined_1fps_1280x720](https://github.com/user-attachments/assets/211f09ec-713a-4a55-b8d1-be1fead77d53)
 
 
 ## Keyboard Shortcuts
+
 
 This extension does not register a default direct hotkey for sync actions.
 Use the Command Palette shortcut:
