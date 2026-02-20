@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 import * as vscode from 'vscode';
 import { Credentials } from "./cred";
 import { Repositories } from "./repo";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 export type AutoSyncMode = 'off' | 'prompt' | 'always';
 
 export interface AutoSyncPauseInfo {
