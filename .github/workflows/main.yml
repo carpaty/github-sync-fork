@@ -29,6 +29,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     env:
       VSCE_PAT: ${{ secrets.VS_TOKEN }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v4
@@ -43,7 +44,8 @@ jobs:
       - run: npm version patch -m "Update to [%s] [ci skip]"
       - run: npm install
       - run: xvfb-run -a npm test
-      - run: npm install -g vsce
+      - run: npm install -g vsce ovsx
       - run: vsce package
       - run: vsce publish --skip-duplicate
+      - run: ovsx publish
       - run: git push
